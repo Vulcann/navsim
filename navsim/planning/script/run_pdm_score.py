@@ -134,7 +134,7 @@ def run_pdm_score(args: List[Dict[str, Union[List[str], DictConfig]]]) -> List[p
     )
     scene_loader_tokens_stage_two = scene_loader.reactive_tokens_stage_two
 
-    tokens_to_evaluate_stage_two = list(set(scene_loader_tokens_stage_two) & set(metric_cache_loader.tokens))
+    tokens_to_evaluate_stage_two = list(set(scene_loader_tokens_stage_two or []) & set(metric_cache_loader.tokens))
     for idx, (token) in enumerate(tokens_to_evaluate_stage_two):
         logger.info(
             f"Processing stage two reactive scenario {idx + 1} / {len(tokens_to_evaluate_stage_two)} in thread_id={thread_id}, node_id={node_id}"
@@ -364,9 +364,9 @@ def main(cfg: DictConfig) -> None:
 
     pdm_score_df = pd.concat(score_rows)
 
+    all_mappings: Dict[Tuple[str, str], List[Tuple[str, str]]] = {}
     try:
         raw_mapping = cfg.train_test_split.reactive_all_mapping
-        all_mappings: Dict[Tuple[str, str], List[Tuple[str, str]]] = {}
 
         for orig_token, prev_token, two_stage_pairs in raw_mapping:
             if prev_token in set(scene_loader.tokens) or orig_token in set(scene_loader.tokens):
@@ -382,6 +382,8 @@ def main(cfg: DictConfig) -> None:
         logger.warning("----------- Failed to calculate pseudo closed-loop weights or comfort:")
         traceback.print_exc()
         pdm_score_df["weight"] = 1.0
+        pdm_score_df["two_frame_extended_comfort"] = 1.0
+        pdm_score_df = compute_final_scores(pdm_score_df)
         pseudo_closed_loop_valid = False
 
     num_sucessful_scenarios = pdm_score_df["valid"].sum()
@@ -444,7 +446,7 @@ def main(cfg: DictConfig) -> None:
     combined_row = pd.Series(index=pdm_score_df.columns, dtype=object)
     combined_row["token"] = "extended_pdm_score_combined"
     combined_row["valid"] = pseudo_closed_loop_valid
-    combined_row["score"] = pcl_group_score["score"]
+    combined_row["score"] = pcl_group_score.get("score", np.nan)
 
     for col in pcl_stage1_score.index:
         if col not in ["token", "valid", "score"]:
